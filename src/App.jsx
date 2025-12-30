@@ -892,8 +892,8 @@ export default function App() {
                 )}
               </div>
               <div className="mt-8 text-center text-xs text-gray-400">
-                <p>© 2024 {appConfig.appName}. All rights reserved.</p>
-                <p className="mt-1">SiWarga App Version {APP_VERSION}</p>
+                <p>© 2026 {appConfig.appName}. All rights reserved.</p>
+                <p className="mt-1">Sistem Informasi Warga Terpadu</p>
               </div>
             </div>
           </div>
