@@ -1,0 +1,69 @@
+/* Tambahkan ini di file index.css atau global css Anda */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom Animations used in SiWarga */
+@layer utilities {
+  .animate-in {
+    animation-duration: 150ms;
+    animation-fill-mode: both;
+    opacity: 0;
+  }
+  
+  .fade-in {
+    animation-name: fadeIn;
+    opacity: 1;
+  }
+  
+  .slide-in-from-bottom-4 {
+    animation-name: slideInFromBottom;
+  }
+  
+  .slide-in-from-top-4 {
+    animation-name: slideInFromTop;
+  }
+  
+  .slide-in-from-left-4 {
+    animation-name: slideInFromLeft;
+  }
+  
+  .slide-in-from-right-4 {
+    animation-name: slideInFromRight;
+  }
+  
+  .slide-in-from-right-8 {
+    animation-name: slideInFromRight8;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideInFromBottom {
+  from { transform: translateY(1rem); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes slideInFromTop {
+  from { transform: translateY(-1rem); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes slideInFromLeft {
+  from { transform: translateX(-1rem); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slideInFromRight {
+  from { transform: translateX(1rem); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slideInFromRight8 {
+  from { transform: translateX(2rem); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
