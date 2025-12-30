@@ -25,8 +25,13 @@ import {
   AlertTriangle,
   RotateCcw,
   Search,
-  KeyRound
+  KeyRound,
+  UserPlus,
+  Pencil
 } from 'lucide-react';
+
+// --- CONSTANTS ---
+const APP_VERSION = "2.1"; // Versi Aplikasi
 
 // --- SECURITY UTILS ---
 
@@ -79,10 +84,10 @@ const MOCK_PAYMENTS = [
   { id: '2', houseNumber: 'A1/1', userName: 'Pak Budi', month: 'Februari', year: 2024, amount: 50000, status: 'pending', note: 'Transfer via BCA', date: '2024-02-05', proofLink: '' }
 ];
 
-// --- GAS SCRIPT ---
+// --- GAS SCRIPT (UPDATED with editUser) ---
 const GAS_SCRIPT_CODE = `/**
- * Backend SiWarga v3
- * Update: Menambahkan fitur Reset PIN
+ * Backend SiWarga v2.1
+ * WAJIB UPDATE: Copy kode ini ke Google Apps Script Anda untuk fitur Edit Data
  */
 const SHEET_USERS = 'Users';
 const SHEET_PAYMENTS = 'Payments';
@@ -94,7 +99,6 @@ function doGet(e) {
   
   if (action === 'getUsers') {
     const sheet = ss.getSheetByName(SHEET_USERS) || createSheetUsers(ss);
-    // Gunakan getDisplayValues untuk memastikan format string terjaga (misal '0123')
     const data = sheet.getDataRange().getDisplayValues(); 
     const users = data.slice(1).map(r => ({ 
       houseNumber: r[0], name: r[1], role: r[2], pin: r[3] 
@@ -137,14 +141,24 @@ function doPost(e) {
       const existing = sheet.getDataRange().getValues();
       const isExist = existing.some(r => r[0] == body.houseNumber);
       if (!isExist) {
-        // Paksa simpan sebagai string dengan tanda petik satu
         sheet.appendRow([body.houseNumber, body.name, body.role, "'" + body.pin]);
         return jsonResponse({ status: 'success', message: 'User registered' });
       }
       return jsonResponse({ status: 'error', message: 'Rumah sudah terdaftar' });
     }
 
-    // --- Reset PIN Logic ---
+    if (action === 'editUser') {
+      const sheet = ss.getSheetByName(SHEET_USERS);
+      const data = sheet.getDataRange().getValues();
+      for (let i = 1; i < data.length; i++) {
+        if (data[i][0] == body.houseNumber) {
+           sheet.getRange(i + 1, 2).setValue(body.name); // Update Name (Kolom 2/B)
+           return jsonResponse({ status: 'success', message: 'Data user diupdate' });
+        }
+      }
+      return jsonResponse({ status: 'error', message: 'User tidak ditemukan' });
+    }
+
     if (action === 'resetUserPin') {
       const sheet = ss.getSheetByName(SHEET_USERS);
       const data = sheet.getDataRange().getValues();
@@ -265,10 +279,51 @@ const Modal = ({ isOpen, onClose, title, children }) => {
   );
 };
 
-// --- Settings Component with User Management ---
+// --- Settings Content ---
 const SettingsContent = (props) => {
-  const { isSettingsUnlocked, inputSettingsPass, setInputSettingsPass, handleUnlockSettings, configTab, setConfigTab, dbConfig, setDbConfig, saveConfig, loading, handleRefresh, lastSynced, appConfig, setAppConfig, handleSaveAppConfig, newSettingsPass, setNewSettingsPass, confirmSettingsPass, setConfirmSettingsPass, handleChangeSettingsPassword, showUrl, setShowUrl, failedAttempts, isLockedOut, scriptCopied, handleCopyScript, users, handleResetPin } = props;
+  const { isSettingsUnlocked, inputSettingsPass, setInputSettingsPass, handleUnlockSettings, configTab, setConfigTab, dbConfig, setDbConfig, saveConfig, loading, handleRefresh, lastSynced, appConfig, setAppConfig, handleSaveAppConfig, newSettingsPass, setNewSettingsPass, confirmSettingsPass, setConfirmSettingsPass, handleChangeSettingsPassword, showUrl, setShowUrl, failedAttempts, isLockedOut, scriptCopied, handleCopyScript, users, handleResetPin, handleAddCitizen, handleEditCitizen } = props;
   const [searchTerm, setSearchTerm] = useState('');
+  
+  // State form tambah warga
+  const [addBlockLetter, setAddBlockLetter] = useState('A');
+  const [addBlockNum, setAddBlockNum] = useState('1');
+  const [addHouseNum, setAddHouseNum] = useState('1');
+  const [addName, setAddName] = useState('');
+  const [addPin, setAddPin] = useState('123456');
+
+  // State edit warga
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState('');
+
+  const onAddClick = () => {
+    if(!addName.trim()) return alert("Nama wajib diisi");
+    handleAddCitizen({
+      blockLetter: addBlockLetter,
+      blockNum: addBlockNum,
+      houseNum: addHouseNum,
+      name: addName,
+      pin: addPin
+    });
+    setAddName('');
+    setAddPin('123456');
+  };
+
+  const startEditing = (user) => {
+    setEditingId(user.houseNumber);
+    setEditName(user.name);
+  };
+
+  const cancelEditing = () => {
+    setEditingId(null);
+    setEditName('');
+  };
+
+  const saveEditing = () => {
+    if (editName.trim()) {
+      handleEditCitizen(editingId, editName);
+      setEditingId(null);
+    }
+  };
 
   if (isLockedOut) return <div className="text-center p-8 bg-red-50 rounded-xl border border-red-100 animate-in fade-in"><ShieldAlert className="w-16 h-16 mx-auto text-red-600 mb-4 animate-pulse" /><h3 className="text-lg font-bold text-red-800 mb-2">Akses Terkunci Sementara</h3><p className="text-red-600 text-sm">Terlalu banyak percobaan salah. Silakan tunggu 30 detik.</p></div>;
 
@@ -298,22 +353,58 @@ const SettingsContent = (props) => {
 
       {configTab === 'warga' && (
         <div className="space-y-4 pt-2 animate-in fade-in">
+          {/* Add Citizen Form */}
+          <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100 shadow-sm">
+              <h4 className="text-sm font-bold text-emerald-800 mb-3 flex items-center gap-2"><UserPlus className="w-4 h-4"/> Tambah Warga Baru</h4>
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-2">
+                    <div className="relative"><select value={addBlockLetter} onChange={e=>setAddBlockLetter(e.target.value)} className="w-full p-2 rounded-lg border border-emerald-200 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500">{BLOCK_LETTERS.map(l=><option key={l} value={l}>Blok {l}</option>)}</select></div>
+                    <div className="relative"><select value={addBlockNum} onChange={e=>setAddBlockNum(e.target.value)} className="w-full p-2 rounded-lg border border-emerald-200 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500">{BLOCK_NUMBERS.map(n=><option key={n} value={n}>No {n}</option>)}</select></div>
+                    <div className="relative"><select value={addHouseNum} onChange={e=>setAddHouseNum(e.target.value)} className="w-full p-2 rounded-lg border border-emerald-200 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500">{HOUSE_NUMBERS.map(n=><option key={n} value={n}>Rmh {n}</option>)}</select></div>
+                </div>
+                <input type="text" placeholder="Nama Lengkap" value={addName} onChange={e=>setAddName(e.target.value)} className="w-full p-2 rounded-lg border border-emerald-200 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500" />
+                <div className="flex gap-2">
+                   <input type="text" placeholder="PIN Awal" value={addPin} onChange={e=>setAddPin(e.target.value)} className="w-1/3 p-2 rounded-lg border border-emerald-200 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500" />
+                   <button onClick={onAddClick} disabled={loading} className="flex-1 bg-emerald-600 text-white p-2 rounded-lg text-xs font-bold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-1">{loading ? <RefreshCw className="w-3 h-3 animate-spin"/> : <><Plus className="w-3 h-3"/> Simpan & Sinkron</>}</button>
+                </div>
+              </div>
+          </div>
+
           <div className="relative"><input type="text" placeholder="Cari nama atau rumah..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-9 p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none"/><Search className="w-4 h-4 text-gray-400 absolute left-3 top-3"/></div>
-          <div className="max-h-64 overflow-y-auto border border-gray-200 rounded-lg">
+          <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg">
             <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50"><tr><th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Rumah</th><th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Nama</th><th className="px-3 py-2 text-right text-xs font-medium text-gray-500">Aksi</th></tr></thead>
+              <thead className="bg-gray-50"><tr><th className="px-3 py-2 text-left text-xs font-medium text-gray-500 w-20">Rumah</th><th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Nama</th><th className="px-3 py-2 text-right text-xs font-medium text-gray-500 w-40">Aksi</th></tr></thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {users.filter(u => u.name.toLowerCase().includes(searchTerm.toLowerCase()) || u.houseNumber.toLowerCase().includes(searchTerm.toLowerCase())).map((user, idx) => (
                   <tr key={idx}>
-                    <td className="px-3 py-2 text-xs font-mono text-gray-600">{user.houseNumber}</td>
-                    <td className="px-3 py-2 text-xs font-medium text-gray-900">{user.name}</td>
-                    <td className="px-3 py-2 text-right"><button onClick={() => handleResetPin(user)} className="p-1.5 bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors text-[10px] font-bold border border-red-200 flex items-center gap-1 ml-auto"><RotateCcw className="w-3 h-3"/> Reset PIN</button></td>
+                    <td className="px-3 py-2 text-xs font-mono text-gray-600 align-middle">{user.houseNumber}</td>
+                    <td className="px-3 py-2 text-xs font-medium text-gray-900 align-middle">
+                      {editingId === user.houseNumber ? (
+                        <input className="w-full border border-emerald-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500" value={editName} onChange={e => setEditName(e.target.value)} autoFocus />
+                      ) : (
+                        user.name
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right align-middle">
+                      <div className="flex justify-end gap-2">
+                        {editingId === user.houseNumber ? (
+                          <>
+                            <button onClick={saveEditing} disabled={loading} className="px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors border border-green-200 text-[10px] font-medium flex items-center gap-1"><Check className="w-3 h-3"/> Simpan</button>
+                            <button onClick={cancelEditing} className="px-2 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 transition-colors border border-gray-200 text-[10px] font-medium"><X className="w-3 h-3"/></button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => startEditing(user)} className="px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors border border-blue-200 text-[10px] font-medium flex items-center gap-1"><Pencil className="w-3 h-3"/> Edit</button>
+                            <button onClick={() => handleResetPin(user)} className="px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors border border-red-200 text-[10px] font-medium flex items-center gap-1"><RotateCcw className="w-3 h-3"/> Reset PIN</button>
+                          </>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <p className="text-[10px] text-gray-500 italic">*Reset PIN akan mengubah PIN warga menjadi <strong>123456</strong>.</p>
         </div>
       )}
 
@@ -321,7 +412,7 @@ const SettingsContent = (props) => {
          <div className="space-y-6 pt-4 text-center animate-in fade-in">
             <div className="bg-blue-50 p-5 rounded-xl border border-blue-100">
               <h4 className="text-sm font-bold text-blue-800 mb-1">Sinkronisasi Data</h4>
-              <p className="text-xs text-blue-600 mb-4">Tarik data aman dari server untuk memperbarui tampilan.</p>
+              <p className="text-xs text-blue-600 mb-4">Tarik data aman dari server (Google Sheet) untuk memperbarui tampilan.</p>
               {dbConfig.mode === 'sheet' ? (
                 <button onClick={handleRefresh} disabled={loading} className="inline-flex items-center justify-center px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 shadow-sm"><RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />{loading ? 'Menyinkronkan...' : 'Sinkronisasi Aman'}</button>
               ) : ( <div className="text-xs text-orange-600 bg-orange-100 p-3 rounded-lg border border-orange-200 font-medium">Mode Lokal.</div> )}
@@ -371,7 +462,7 @@ export default function App() {
   const [payments, setPayments] = useState([]);
   const [sessionUser, setSessionUser] = useState(null);
   const [dbConfig, setDbConfig] = useState({ mode: 'sheet', scriptUrl: '' });
-  const [appConfig, setAppConfig] = useState({ appName: 'SiWarga Aman', housingName: 'Perumahan Muslim Mutiara Darussalam', logoUrl: '' });
+  const [appConfig, setAppConfig] = useState({ appName: 'SiWarga v2.1', housingName: 'Perumahan Muslim Mutiara Darussalam', logoUrl: '' });
   const [settingsPassHash, setSettingsPassHash] = useState('');
   const [isSettingsUnlocked, setIsSettingsUnlocked] = useState(false);
   const [inputSettingsPass, setInputSettingsPass] = useState('');
@@ -394,7 +485,7 @@ export default function App() {
   const [selBlockNum, setSelBlockNum] = useState('1');
   const [selHouseNum, setSelHouseNum] = useState('1');
   const [inputPin, setInputPin] = useState('');
-  const [showPin, setShowPin] = useState(false); // NEW: Show PIN toggle
+  const [showPin, setShowPin] = useState(false); 
   const [inputName, setInputName] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
   const [detectedUser, setDetectedUser] = useState(null);
@@ -404,7 +495,7 @@ export default function App() {
   // Payment States
   const [payMonth, setPayMonth] = useState(MONTHS[new Date().getMonth()]);
   const [payYear, setPayYear] = useState(new Date().getFullYear());
-  const [payAmount, setPayAmount] = useState(200000);
+  const [payAmount, setPayAmount] = useState(50000);
   const [payNote, setPayNote] = useState('');
   const [payFile, setPayFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
@@ -413,7 +504,6 @@ export default function App() {
 
   const showToast = (message, type = 'info') => setToast({ message, type });
 
-  // Init Data
   useEffect(() => {
     const initializeSecurity = async () => {
       const savedConfig = localStorage.getItem('siwarga_db_config');
@@ -449,7 +539,6 @@ export default function App() {
   useEffect(() => { if (dbConfig.mode === 'sheet' && dbConfig.scriptUrl) fetchDataFromSheet(); }, [dbConfig]);
   useEffect(() => { if (isLockedOut) { const timer = setTimeout(() => { setIsLockedOut(false); setFailedAttempts(0); }, 30000); return () => clearTimeout(timer); } }, [isLockedOut]);
 
-  // --- FIXED: Fetch & Migrate Logic ---
   const fetchDataFromSheet = async () => {
     if (!dbConfig.scriptUrl || !dbConfig.scriptUrl.startsWith('http')) return; 
     setLoading(true); setUploadProgress('Enkripsi data...');
@@ -457,17 +546,11 @@ export default function App() {
       const resUsers = await fetch(`${dbConfig.scriptUrl}?action=getUsers`);
       const dataUsers = await resUsers.json();
       if (dataUsers.status === 'success') {
-          // Proses data users dari sheet:
-          // Jika PIN panjang (<20 char) kemungkinan itu Plain Text (Data Lama), jadi kita Hash dulu di sisi App
-          // Jika PIN panjang (64 char), itu sudah hash dari DB baru.
           const processedUsers = await Promise.all(dataUsers.data.map(async (u) => {
-            // Kita paksa konversi ke string dulu untuk cek length
             const pinStr = String(u.pin);
             if (pinStr.length < 20) {
-               // Ini data lama (Plain Text), misal "10147" atau "010147"
                return { ...u, pin: await hashString(pinStr) };
             }
-            // Ini data baru (sudah hash)
             return u;
           }));
           setUsers(processedUsers);
@@ -537,6 +620,69 @@ export default function App() {
     else showToast("Gagal copy", "error");
   };
 
+  const handleAddCitizen = async ({ blockLetter, blockNum, houseNum, name, pin }) => {
+    const fullHouseId = `${blockLetter}${blockNum}/${houseNum}`;
+    const userExists = users.some(u => u.houseNumber === fullHouseId);
+    
+    if (userExists) {
+      showToast(`Rumah ${fullHouseId} sudah terdaftar`, "error");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const pinHash = await hashString(pin);
+      const newUserData = { houseNumber: fullHouseId, name, role: 'warga', pin: pinHash };
+
+      if (dbConfig.mode === 'sheet') {
+        const result = await saveDataToSheet('registerUser', { ...newUserData, pin }); 
+        if (result.status === 'success') {
+          showToast(`Warga ${name} berhasil ditambahkan!`, "success");
+          await fetchDataFromSheet(); 
+        } else {
+          showToast("Gagal menambah: " + result.message, "error");
+        }
+      } else {
+        const updatedUsers = [...users, newUserData];
+        setUsers(updatedUsers);
+        localStorage.setItem('siwarga_users', JSON.stringify(updatedUsers));
+        showToast("Warga ditambahkan (Lokal)!", "success");
+      }
+    } catch (e) {
+      showToast("Terjadi kesalahan sistem", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- NEW: Edit Citizen Feature ---
+  const handleEditCitizen = async (houseNumber, newName) => {
+    setLoading(true);
+    try {
+      if (dbConfig.mode === 'sheet') {
+        const result = await saveDataToSheet('editUser', { houseNumber, name: newName });
+        if (result.status === 'success') {
+          showToast("Data warga berhasil diperbarui!", "success");
+          await fetchDataFromSheet(); // Sinkronisasi otomatis dari sheet
+        } else {
+          showToast("Gagal update di database: " + result.message, "error");
+        }
+      } else {
+        // Local Mode
+        const updatedUsers = users.map(u => 
+          u.houseNumber === houseNumber ? { ...u, name: newName } : u
+        );
+        setUsers(updatedUsers);
+        localStorage.setItem('siwarga_users', JSON.stringify(updatedUsers));
+        showToast("Data warga diperbarui (Lokal)!", "success");
+      }
+    } catch (e) {
+      showToast("Gagal mengedit data", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleResetPin = async (userToReset) => {
     if (!confirm(`Reset PIN untuk ${userToReset.name} (${userToReset.houseNumber}) menjadi 123456?`)) return;
     
@@ -556,7 +702,6 @@ export default function App() {
           showToast("Gagal mereset di database: " + result.message, "error");
         }
       } else {
-        // Local Mode Reset
         const updatedUsers = users.map(u => 
           u.houseNumber === userToReset.houseNumber ? { ...u, pin: defaultPinHash } : u
         );
@@ -594,35 +739,16 @@ export default function App() {
     } catch (e) { showToast("Gagal mendaftar.", "error"); } finally { setLoading(false); }
   };
 
-  // --- FIXED: Robust Login Logic ---
   const handleLogin = async (e) => {
     e.preventDefault();
     if (detectedUser) {
       const inputTrimmed = inputPin.trim(); 
-      
-      // 1. Hash input apa adanya (misal "010147")
       const inputHash = await hashString(inputTrimmed);
-      
-      // 2. Hash input versi Number (misal "10147") - Antisipasi Google Sheet memotong nol
       let inputHashNoZero = '';
-      if (!isNaN(inputTrimmed)) {
-         inputHashNoZero = await hashString(Number(inputTrimmed).toString());
-      }
-
-      // 3. Hash khusus untuk admin default "1234"
+      if (!isNaN(inputTrimmed)) { inputHashNoZero = await hashString(Number(inputTrimmed).toString()); }
       const defaultAdminHash = await hashString("1234");
-
-      // Cek kecocokan
       const storedPin = String(detectedUser.pin).trim(); 
-      
-      const isMatch = 
-        storedPin === inputHash ||        // Cocok dengan hash normal
-        storedPin === inputHashNoZero ||  // Cocok dengan hash tanpa nol
-        storedPin === inputTrimmed ||     // Cocok dengan Plain Text (Legacy Data)
-        // Fallback Khusus: Cek jika data legacy "10147" vs input "010147" secara angka
-        (!isNaN(inputTrimmed) && !isNaN(storedPin) && Number(storedPin) === Number(inputTrimmed)) ||
-        (storedPin === '' && inputTrimmed === '1234') || // Admin baru
-        (detectedUser.role === 'admin' && storedPin === defaultAdminHash && inputTrimmed === '1234');
+      const isMatch = storedPin === inputHash || storedPin === inputHashNoZero || storedPin === inputTrimmed || (!isNaN(inputTrimmed) && !isNaN(storedPin) && Number(storedPin) === Number(inputTrimmed)) || (storedPin === '' && inputTrimmed === '1234') || (detectedUser.role === 'admin' && storedPin === defaultAdminHash && inputTrimmed === '1234');
 
       if (isMatch) {
         setSessionUser(detectedUser);
@@ -765,6 +891,10 @@ export default function App() {
                   </form>
                 )}
               </div>
+              <div className="mt-8 text-center text-xs text-gray-400">
+                <p>© 2024 {appConfig.appName}. All rights reserved.</p>
+                <p className="mt-1">SiWarga App Version {APP_VERSION}</p>
+              </div>
             </div>
           </div>
         ) : (
@@ -835,13 +965,35 @@ export default function App() {
                 </div>
               </div>
             </main>
+            <footer className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 text-center">
+              <p className="text-xs text-gray-400">
+                © 2024 {appConfig.appName}. SiWarga App Version {APP_VERSION}
+              </p>
+            </footer>
           </div>
         )}
 
         <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Ajukan Pembayaran Baru">
           <form onSubmit={handleSubmitPayment} className="space-y-5">
             <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm font-medium text-gray-700 mb-1">Bulan</label><div className="relative"><select value={payMonth} onChange={(e) => setPayMonth(e.target.value)} className="w-full appearance-none p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none text-sm bg-white">{MONTHS.map((month) => <option key={month} value={month}>{month}</option>)}</select><ChevronDown className="absolute right-2 top-3 w-4 h-4 text-gray-400 pointer-events-none"/></div></div><div><label className="block text-sm font-medium text-gray-700 mb-1">Tahun</label><input type="number" value={payYear} onChange={(e) => setPayYear(parseInt(e.target.value))} className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none text-sm" min="2020" max="2030"/></div></div>
-            <div><label className="block text-sm font-medium text-gray-700 mb-1">Jumlah Iuran</label><div className="relative"><span className="absolute left-3 top-2.5 text-gray-500 font-medium text-sm">Rp</span><input type="number" value={payAmount} onChange={(e) => setPayAmount(parseInt(e.target.value))} className="w-full pl-10 p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none font-medium" min="1000"/></div></div>
+            
+            {/* INPUT NOMINAL DENGAN FORMAT RIBUAN */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Jumlah Iuran</label>
+              <div className="relative">
+                <span className="absolute left-3 top-2.5 text-gray-500 font-medium text-sm">Rp</span>
+                <input 
+                  type="text" 
+                  value={payAmount.toLocaleString('id-ID')} 
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, ''); // Hapus non-digit
+                    setPayAmount(val ? parseInt(val) : 0);
+                  }}
+                  className="w-full pl-10 p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none font-medium" 
+                />
+              </div>
+            </div>
+
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Catatan <span className="text-gray-400 font-normal">(Opsional)</span></label><input type="text" value={payNote} onChange={(e) => setPayNote(e.target.value)} className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none text-sm" placeholder="Contoh: Transfer via BCA a.n Budi"/></div>
             <div><label className="block text-sm font-medium text-gray-700 mb-2">Upload Bukti Transfer</label><div className={`mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-dashed rounded-xl transition-all ${previewUrl ? 'border-emerald-300 bg-emerald-50' : 'border-gray-300 hover:border-emerald-400 hover:bg-gray-50'}`}><div className="space-y-1 text-center">{previewUrl ? ( <div className="relative"><img src={previewUrl} alt="Preview" className="h-32 object-contain mx-auto rounded-lg shadow-sm border border-emerald-200" /><button type="button" onClick={()=>{setPayFile(null); setPreviewUrl(null)}} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600"><X className="w-4 h-4"/></button><p className="text-xs text-emerald-600 mt-2 font-medium">Siap diupload</p></div> ) : ( <><Upload className="mx-auto h-12 w-12 text-gray-400" /><div className="flex text-sm text-gray-600 justify-center"><label className="relative cursor-pointer rounded-md font-medium text-emerald-600 hover:text-emerald-500 focus-within:outline-none"><span>Upload file</span><input type="file" className="sr-only" accept="image/*,.pdf" onChange={handleFileChange} /></label></div><p className="text-xs text-gray-500">PNG, JPG, PDF up to 5MB</p></> )}</div></div></div>
             {uploadProgress && ( <div className="text-sm flex items-center gap-2 text-blue-600 bg-blue-50 p-3 rounded-lg border border-blue-100"><div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>{uploadProgress}</div> )}
@@ -849,17 +1001,8 @@ export default function App() {
           </form>
         </Modal>
 
-        <Modal isOpen={!!viewProofModal} onClose={() => setViewProofModal(null)} title="Detail Bukti Transfer">
-          {viewProofModal && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm bg-gray-50 p-4 rounded-xl border border-gray-100"><div><p className="text-gray-500 text-xs uppercase tracking-wide mb-0.5">Warga</p><p className="font-semibold text-gray-900">{viewProofModal.userName}</p><p className="text-xs font-mono text-gray-500">{viewProofModal.houseNumber}</p></div><div className="text-right"><p className="text-gray-500 text-xs uppercase tracking-wide mb-0.5">Jumlah</p><p className="font-bold text-emerald-700 text-lg">{formatCurrency(viewProofModal.amount)}</p></div><div className="col-span-2 border-t border-gray-200 pt-2 flex justify-between"><span>{viewProofModal.month} {viewProofModal.year}</span><span className="text-gray-500">{new Date(viewProofModal.date).toLocaleDateString()}</span></div></div>
-              <div className="border border-gray-200 rounded-xl overflow-hidden bg-slate-100 min-h-[200px] flex items-center justify-center relative group"><img src={getEmbedUrl(viewProofModal.proofLink)} alt="Bukti Transfer" className="w-full h-auto max-h-[400px] object-contain" onError={(e) => { e.target.onerror = null; e.target.src = 'https://via.placeholder.com/400x300?text=Gagal+Memuat+Gambar'; }} /><div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><a href={getEmbedUrl(viewProofModal.proofLink)} target="_blank" rel="noreferrer" className="bg-white text-gray-900 px-4 py-2 rounded-lg font-medium hover:bg-gray-100 transition-colors">Buka Gambar Asli</a></div></div>
-            </div>
-          )}
-        </Modal>
-
         <Modal isOpen={isConfigOpen} onClose={() => setIsConfigOpen(false)} title="Pengaturan Aplikasi">
-           <SettingsContent isSettingsUnlocked={isSettingsUnlocked} inputSettingsPass={inputSettingsPass} setInputSettingsPass={setInputSettingsPass} handleUnlockSettings={handleUnlockSettings} configTab={configTab} setConfigTab={setConfigTab} dbConfig={dbConfig} setDbConfig={setDbConfig} saveConfig={saveConfig} loading={loading} handleRefresh={handleRefresh} lastSynced={lastSynced} appConfig={appConfig} setAppConfig={setAppConfig} handleSaveAppConfig={handleSaveAppConfig} scriptCopied={scriptCopied} handleCopyScript={handleCopyScript} newSettingsPass={newSettingsPass} setNewSettingsPass={setNewSettingsPass} confirmSettingsPass={confirmSettingsPass} setConfirmSettingsPass={setConfirmSettingsPass} handleChangeSettingsPassword={handleChangeSettingsPassword} showUrl={showUrl} setShowUrl={setShowUrl} failedAttempts={failedAttempts} isLockedOut={isLockedOut} users={users} handleResetPin={handleResetPin} />
+           <SettingsContent isSettingsUnlocked={isSettingsUnlocked} inputSettingsPass={inputSettingsPass} setInputSettingsPass={setInputSettingsPass} handleUnlockSettings={handleUnlockSettings} configTab={configTab} setConfigTab={setConfigTab} dbConfig={dbConfig} setDbConfig={setDbConfig} saveConfig={saveConfig} loading={loading} handleRefresh={handleRefresh} lastSynced={lastSynced} appConfig={appConfig} setAppConfig={setAppConfig} handleSaveAppConfig={handleSaveAppConfig} scriptCopied={scriptCopied} handleCopyScript={handleCopyScript} newSettingsPass={newSettingsPass} setNewSettingsPass={setNewSettingsPass} confirmSettingsPass={confirmSettingsPass} setConfirmSettingsPass={setConfirmSettingsPass} handleChangeSettingsPassword={handleChangeSettingsPassword} showUrl={showUrl} setShowUrl={setShowUrl} failedAttempts={failedAttempts} isLockedOut={isLockedOut} users={users} handleResetPin={handleResetPin} handleAddCitizen={handleAddCitizen} handleEditCitizen={handleEditCitizen} />
         </Modal>
       </div>
     </SecurityGuard>
