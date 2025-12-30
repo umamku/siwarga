@@ -27,11 +27,16 @@ import {
   Search,
   KeyRound,
   UserPlus,
-  Pencil
+  Pencil,
+  Tags,
+  Trash2,
+  PieChart,
+  Calendar,
+  Filter
 } from 'lucide-react';
 
 // --- CONSTANTS ---
-const APP_VERSION = "2.1"; // Versi Aplikasi
+const APP_VERSION = "2.1"; // Versi Aplikasi sesuai permintaan
 
 // --- SECURITY UTILS ---
 
@@ -73,6 +78,8 @@ const BLOCK_NUMBERS = ['1', '2', '3', '4', '5'];
 const HOUSE_NUMBERS = Array.from({length: 22}, (_, i) => i + 1);
 const MONTHS = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 
+const DEFAULT_CATEGORIES = ['Iuran Rutin', 'Iuran Sosial', 'Iuran PHBI', 'Iuran Kebersihan'];
+
 // Mock data awal
 const MOCK_USERS_INIT = [
   { houseNumber: 'A1/1', name: 'Pak Budi', role: 'warga', pin: '1234' },
@@ -80,17 +87,18 @@ const MOCK_USERS_INIT = [
 ];
 
 const MOCK_PAYMENTS = [
-  { id: '1', houseNumber: 'A1/1', userName: 'Pak Budi', month: 'Januari', year: 2024, amount: 50000, status: 'confirmed', note: 'Lunas awal tahun', date: '2024-01-05', proofLink: '' },
-  { id: '2', houseNumber: 'A1/1', userName: 'Pak Budi', month: 'Februari', year: 2024, amount: 50000, status: 'pending', note: 'Transfer via BCA', date: '2024-02-05', proofLink: '' }
+  { id: '1', houseNumber: 'A1/1', userName: 'Pak Budi', month: 'Januari', year: 2024, amount: 50000, status: 'confirmed', note: 'Lunas awal tahun', date: '2024-01-05', proofLink: '', category: 'Iuran Rutin' },
+  { id: '2', houseNumber: 'A1/1', userName: 'Pak Budi', month: 'Februari', year: 2024, amount: 50000, status: 'pending', note: 'Transfer via BCA', date: '2024-02-05', proofLink: '', category: 'Iuran Rutin' }
 ];
 
-// --- GAS SCRIPT (UPDATED with editUser) ---
+// --- GAS SCRIPT ---
 const GAS_SCRIPT_CODE = `/**
  * Backend SiWarga v2.1
- * WAJIB UPDATE: Copy kode ini ke Google Apps Script Anda untuk fitur Edit Data
+ * Fitur Lengkap: Kategori, Filter, Edit, Sync, Reset PIN
  */
 const SHEET_USERS = 'Users';
 const SHEET_PAYMENTS = 'Payments';
+const SHEET_CATEGORIES = 'Categories'; 
 const DRIVE_FOLDER_NAME = 'SiWarga_Bukti_Transfer';
 
 function doGet(e) {
@@ -106,12 +114,19 @@ function doGet(e) {
     return jsonResponse({ status: 'success', data: users });
   }
   
+  if (action === 'getCategories') {
+    const sheet = ss.getSheetByName(SHEET_CATEGORIES) || createSheetCategories(ss);
+    const data = sheet.getDataRange().getValues();
+    const categories = data.slice(1).map(r => r[0]).filter(c => c !== "");
+    return jsonResponse({ status: 'success', data: categories });
+  }
+
   if (action === 'getPayments') {
     const sheet = ss.getSheetByName(SHEET_PAYMENTS) || createSheetPayments(ss);
     const data = sheet.getDataRange().getValues();
     const payments = data.slice(1).map(r => ({
       id: r[0], houseNumber: r[1], userName: r[2], month: r[3], year: r[4], 
-      amount: r[5], status: r[6], note: r[7], proofLink: r[8], date: r[9]
+      amount: r[5], status: r[6], note: r[7], proofLink: r[8], date: r[9], category: r[10] || 'Iuran Rutin'
     }));
     return jsonResponse({ status: 'success', data: payments });
   }
@@ -152,7 +167,7 @@ function doPost(e) {
       const data = sheet.getDataRange().getValues();
       for (let i = 1; i < data.length; i++) {
         if (data[i][0] == body.houseNumber) {
-           sheet.getRange(i + 1, 2).setValue(body.name); // Update Name (Kolom 2/B)
+           sheet.getRange(i + 1, 2).setValue(body.name);
            return jsonResponse({ status: 'success', message: 'Data user diupdate' });
         }
       }
@@ -171,9 +186,27 @@ function doPost(e) {
       return jsonResponse({ status: 'error', message: 'User tidak ditemukan' });
     }
 
+    if (action === 'addCategory') {
+      const sheet = ss.getSheetByName(SHEET_CATEGORIES) || createSheetCategories(ss);
+      sheet.appendRow([body.category]);
+      return jsonResponse({ status: 'success', message: 'Kategori ditambahkan' });
+    }
+
+    if (action === 'deleteCategory') {
+      const sheet = ss.getSheetByName(SHEET_CATEGORIES);
+      const data = sheet.getDataRange().getValues();
+      for (let i = 1; i < data.length; i++) {
+        if (data[i][0] == body.category) {
+           sheet.deleteRow(i + 1);
+           return jsonResponse({ status: 'success', message: 'Kategori dihapus' });
+        }
+      }
+      return jsonResponse({ status: 'error', message: 'Kategori tidak ditemukan' });
+    }
+
     if (action === 'addPayment') {
       const sheet = ss.getSheetByName(SHEET_PAYMENTS) || createSheetPayments(ss);
-      sheet.appendRow([body.id, body.houseNumber, body.userName, body.month, body.year, body.amount, body.status, body.note, body.proofLink, body.date]);
+      sheet.appendRow([body.id, body.houseNumber, body.userName, body.month, body.year, body.amount, body.status, body.note, body.proofLink, body.date, body.category]);
       return jsonResponse({ status: 'success', message: 'Payment added' });
     }
     
@@ -205,9 +238,18 @@ function createSheetUsers(ss) {
   return sheet;
 }
 
+function createSheetCategories(ss) {
+  const sheet = ss.insertSheet(SHEET_CATEGORIES);
+  sheet.appendRow(['Category Name']);
+  sheet.setFrozenRows(1);
+  const defaults = [['Iuran Rutin'], ['Iuran Sosial'], ['Iuran PHBI']];
+  sheet.getRange(2, 1, defaults.length, 1).setValues(defaults);
+  return sheet;
+}
+
 function createSheetPayments(ss) {
   const sheet = ss.insertSheet(SHEET_PAYMENTS);
-  sheet.appendRow(['ID', 'House Number', 'Name', 'Month', 'Year', 'Amount', 'Status', 'Note', 'Proof Link', 'Date']);
+  sheet.appendRow(['ID', 'House Number', 'Name', 'Month', 'Year', 'Amount', 'Status', 'Note', 'Proof Link', 'Date', 'Category']);
   sheet.setFrozenRows(1);
   return sheet;
 }`;
@@ -353,7 +395,6 @@ const SettingsContent = (props) => {
 
       {configTab === 'warga' && (
         <div className="space-y-4 pt-2 animate-in fade-in">
-          {/* Add Citizen Form */}
           <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100 shadow-sm">
               <h4 className="text-sm font-bold text-emerald-800 mb-3 flex items-center gap-2"><UserPlus className="w-4 h-4"/> Tambah Warga Baru</h4>
               <div className="space-y-3">
@@ -381,9 +422,7 @@ const SettingsContent = (props) => {
                     <td className="px-3 py-2 text-xs font-medium text-gray-900 align-middle">
                       {editingId === user.houseNumber ? (
                         <input className="w-full border border-emerald-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500" value={editName} onChange={e => setEditName(e.target.value)} autoFocus />
-                      ) : (
-                        user.name
-                      )}
+                      ) : ( user.name )}
                     </td>
                     <td className="px-3 py-2 text-right align-middle">
                       <div className="flex justify-end gap-2">
@@ -460,6 +499,8 @@ const SettingsContent = (props) => {
 export default function App() {
   const [users, setUsers] = useState([]);
   const [payments, setPayments] = useState([]);
+  const [categories, setCategories] = useState(DEFAULT_CATEGORIES); 
+  
   const [sessionUser, setSessionUser] = useState(null);
   const [dbConfig, setDbConfig] = useState({ mode: 'sheet', scriptUrl: '' });
   const [appConfig, setAppConfig] = useState({ appName: 'SiWarga v2.1', housingName: 'Perumahan Muslim Mutiara Darussalam', logoUrl: '' });
@@ -475,6 +516,7 @@ export default function App() {
   const [uploadProgress, setUploadProgress] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false); 
   const [viewProofModal, setViewProofModal] = useState(null);
   const [authStep, setAuthStep] = useState('check_house');
   const [scriptCopied, setScriptCopied] = useState(false);
@@ -499,6 +541,16 @@ export default function App() {
   const [payNote, setPayNote] = useState('');
   const [payFile, setPayFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
+  const [payCategory, setPayCategory] = useState(DEFAULT_CATEGORIES[0]); 
+
+  // Recap Filters
+  const [recapFilterType, setRecapFilterType] = useState('all');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+
+  // Category Mgmt
+  const [newCatName, setNewCatName] = useState('');
+
   const [toast, setToast] = useState({ message: '', type: 'info' });
   const currentHouseId = useMemo(() => `${selBlockLetter}${selBlockNum}/${selHouseNum}`, [selBlockLetter, selBlockNum, selHouseNum]);
 
@@ -526,6 +578,9 @@ export default function App() {
       if (savedPayments) setPayments(JSON.parse(savedPayments));
       else setPayments(MOCK_PAYMENTS);
 
+      const savedCategories = localStorage.getItem('siwarga_categories');
+      if (savedCategories) setCategories(JSON.parse(savedCategories));
+
       let currentHash = localStorage.getItem('siwarga_settings_pass_hash');
       if (!currentHash) {
         currentHash = await hashString('KodeRahasia123!'); 
@@ -541,7 +596,7 @@ export default function App() {
 
   const fetchDataFromSheet = async () => {
     if (!dbConfig.scriptUrl || !dbConfig.scriptUrl.startsWith('http')) return; 
-    setLoading(true); setUploadProgress('Enkripsi data...');
+    setLoading(true); setUploadProgress('Sync data...');
     try {
       const resUsers = await fetch(`${dbConfig.scriptUrl}?action=getUsers`);
       const dataUsers = await resUsers.json();
@@ -561,8 +616,17 @@ export default function App() {
       if (dataPayments.status === 'success') {
         const sorted = dataPayments.data.sort((a,b) => new Date(b.date) - new Date(a.date));
         setPayments(sorted);
-        setLastSynced(new Date());
       }
+
+      const resCategories = await fetch(`${dbConfig.scriptUrl}?action=getCategories`);
+      const dataCategories = await resCategories.json();
+      if (dataCategories.status === 'success' && dataCategories.data.length > 0) {
+        setCategories(dataCategories.data);
+        localStorage.setItem('siwarga_categories', JSON.stringify(dataCategories.data));
+      }
+
+      setLastSynced(new Date());
+
     } catch (error) { console.error("Sheet Error:", error); showToast("Gagal sinkronisasi data aman", "error"); } finally { setLoading(false); setUploadProgress(''); }
   };
 
@@ -623,97 +687,79 @@ export default function App() {
   const handleAddCitizen = async ({ blockLetter, blockNum, houseNum, name, pin }) => {
     const fullHouseId = `${blockLetter}${blockNum}/${houseNum}`;
     const userExists = users.some(u => u.houseNumber === fullHouseId);
-    
-    if (userExists) {
-      showToast(`Rumah ${fullHouseId} sudah terdaftar`, "error");
-      return;
-    }
-
+    if (userExists) { showToast(`Rumah ${fullHouseId} sudah terdaftar`, "error"); return; }
     setLoading(true);
     try {
       const pinHash = await hashString(pin);
       const newUserData = { houseNumber: fullHouseId, name, role: 'warga', pin: pinHash };
-
       if (dbConfig.mode === 'sheet') {
         const result = await saveDataToSheet('registerUser', { ...newUserData, pin }); 
-        if (result.status === 'success') {
-          showToast(`Warga ${name} berhasil ditambahkan!`, "success");
-          await fetchDataFromSheet(); 
-        } else {
-          showToast("Gagal menambah: " + result.message, "error");
-        }
+        if (result.status === 'success') { showToast(`Warga ${name} berhasil ditambahkan!`, "success"); await fetchDataFromSheet(); } 
+        else { showToast("Gagal menambah: " + result.message, "error"); }
       } else {
-        const updatedUsers = [...users, newUserData];
-        setUsers(updatedUsers);
-        localStorage.setItem('siwarga_users', JSON.stringify(updatedUsers));
-        showToast("Warga ditambahkan (Lokal)!", "success");
+        const updatedUsers = [...users, newUserData]; setUsers(updatedUsers); localStorage.setItem('siwarga_users', JSON.stringify(updatedUsers)); showToast("Warga ditambahkan (Lokal)!", "success");
       }
-    } catch (e) {
-      showToast("Terjadi kesalahan sistem", "error");
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { showToast("Terjadi kesalahan sistem", "error"); } finally { setLoading(false); }
   };
 
-  // --- NEW: Edit Citizen Feature ---
   const handleEditCitizen = async (houseNumber, newName) => {
     setLoading(true);
     try {
       if (dbConfig.mode === 'sheet') {
         const result = await saveDataToSheet('editUser', { houseNumber, name: newName });
-        if (result.status === 'success') {
-          showToast("Data warga berhasil diperbarui!", "success");
-          await fetchDataFromSheet(); // Sinkronisasi otomatis dari sheet
-        } else {
-          showToast("Gagal update di database: " + result.message, "error");
-        }
+        if (result.status === 'success') { showToast("Data warga berhasil diperbarui!", "success"); await fetchDataFromSheet(); } 
+        else { showToast("Gagal update di database: " + result.message, "error"); }
       } else {
-        // Local Mode
-        const updatedUsers = users.map(u => 
-          u.houseNumber === houseNumber ? { ...u, name: newName } : u
-        );
-        setUsers(updatedUsers);
-        localStorage.setItem('siwarga_users', JSON.stringify(updatedUsers));
-        showToast("Data warga diperbarui (Lokal)!", "success");
+        const updatedUsers = users.map(u => u.houseNumber === houseNumber ? { ...u, name: newName } : u); setUsers(updatedUsers); localStorage.setItem('siwarga_users', JSON.stringify(updatedUsers)); showToast("Data warga diperbarui (Lokal)!", "success");
       }
-    } catch (e) {
-      showToast("Gagal mengedit data", "error");
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { showToast("Gagal mengedit data", "error"); } finally { setLoading(false); }
   };
 
   const handleResetPin = async (userToReset) => {
     if (!confirm(`Reset PIN untuk ${userToReset.name} (${userToReset.houseNumber}) menjadi 123456?`)) return;
-    
     setLoading(true);
     try {
       const defaultPinHash = await hashString('123456');
-      
       if (dbConfig.mode === 'sheet') {
-        const result = await saveDataToSheet('resetUserPin', { 
-          houseNumber: userToReset.houseNumber, 
-          newPinHash: defaultPinHash 
-        });
-        if (result.status === 'success') {
-          showToast(`PIN ${userToReset.name} berhasil direset!`, "success");
-          await fetchDataFromSheet();
-        } else {
-          showToast("Gagal mereset di database: " + result.message, "error");
-        }
+        const result = await saveDataToSheet('resetUserPin', { houseNumber: userToReset.houseNumber, newPinHash: defaultPinHash });
+        if (result.status === 'success') { showToast(`PIN ${userToReset.name} berhasil direset!`, "success"); await fetchDataFromSheet(); } 
+        else { showToast("Gagal mereset di database: " + result.message, "error"); }
       } else {
-        const updatedUsers = users.map(u => 
-          u.houseNumber === userToReset.houseNumber ? { ...u, pin: defaultPinHash } : u
-        );
-        setUsers(updatedUsers);
-        localStorage.setItem('siwarga_users', JSON.stringify(updatedUsers));
-        showToast("PIN berhasil direset (Lokal)!", "success");
+        const updatedUsers = users.map(u => u.houseNumber === userToReset.houseNumber ? { ...u, pin: defaultPinHash } : u); setUsers(updatedUsers); localStorage.setItem('siwarga_users', JSON.stringify(updatedUsers)); showToast("PIN berhasil direset (Lokal)!", "success");
       }
-    } catch (e) {
-      showToast("Terjadi kesalahan sistem", "error");
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { showToast("Terjadi kesalahan sistem", "error"); } finally { setLoading(false); }
+  };
+
+  const handleAddCategory = async (newCatName) => {
+    if (categories.includes(newCatName)) return showToast("Kategori sudah ada", "warning");
+    setLoading(true);
+    try {
+      if (dbConfig.mode === 'sheet') {
+        const res = await saveDataToSheet('addCategory', { category: newCatName });
+        if (res.status === 'success') { showToast("Kategori ditambah", "success"); await fetchDataFromSheet(); }
+      } else {
+        const updatedCats = [...categories, newCatName];
+        setCategories(updatedCats);
+        localStorage.setItem('siwarga_categories', JSON.stringify(updatedCats));
+        showToast("Kategori ditambah (Lokal)", "success");
+      }
+    } catch (e) { showToast("Gagal tambah kategori", "error"); } finally { setLoading(false); setIsCategoryModalOpen(false); }
+  };
+
+  const handleDeleteCategory = async (catName) => {
+    if (!confirm(`Hapus kategori "${catName}"?`)) return;
+    setLoading(true);
+    try {
+      if (dbConfig.mode === 'sheet') {
+        const res = await saveDataToSheet('deleteCategory', { category: catName });
+        if (res.status === 'success') { showToast("Kategori dihapus", "success"); await fetchDataFromSheet(); }
+      } else {
+        const updatedCats = categories.filter(c => c !== catName);
+        setCategories(updatedCats);
+        localStorage.setItem('siwarga_categories', JSON.stringify(updatedCats));
+        showToast("Kategori dihapus (Lokal)", "success");
+      }
+    } catch (e) { showToast("Gagal hapus kategori", "error"); } finally { setLoading(false); }
   };
 
   const checkHouse = () => {
@@ -752,7 +798,7 @@ export default function App() {
 
       if (isMatch) {
         setSessionUser(detectedUser);
-        showToast(`Selamat datang, ${detectedUser.name}`);
+        showToast(`Assalaamu'alaikum, ${detectedUser.name}`);
       } else {
         showToast("PIN Salah!", "error");
       }
@@ -779,10 +825,10 @@ export default function App() {
           const uploadRes = await saveDataToSheet('uploadProof', { base64Data, mimeType: payFile.type, fileName: `secure-${sessionUser.houseNumber}-${Date.now()}` });
           if (uploadRes.status === 'success') finalProofLink = uploadRes.url; else throw new Error('Gagal upload');
         }
-        await saveDataToSheet('addPayment', { id: generateId(), houseNumber: sessionUser.houseNumber, userName: sessionUser.name, month: payMonth, year: payYear, amount: payAmount, note: payNote, status: 'pending', proofLink: finalProofLink, date: new Date().toISOString() });
+        await saveDataToSheet('addPayment', { id: generateId(), houseNumber: sessionUser.houseNumber, userName: sessionUser.name, month: payMonth, year: payYear, amount: payAmount, note: payNote, status: 'pending', proofLink: finalProofLink, date: new Date().toISOString(), category: payCategory });
         await fetchDataFromSheet();
       } else {
-        const newPayment = { id: generateId(), houseNumber: sessionUser.houseNumber, userName: sessionUser.name, month: payMonth, year: payYear, amount: payAmount, note: payNote, status: 'pending', proofLink: previewUrl || finalProofLink, date: new Date().toISOString() };
+        const newPayment = { id: generateId(), houseNumber: sessionUser.houseNumber, userName: sessionUser.name, month: payMonth, year: payYear, amount: payAmount, note: payNote, status: 'pending', proofLink: previewUrl || finalProofLink, date: new Date().toISOString(), category: payCategory };
         const updated = [newPayment, ...payments]; setPayments(updated); localStorage.setItem('siwarga_payments', JSON.stringify(updated));
       }
       setIsModalOpen(false); setPayFile(null); setPreviewUrl(null); setPayNote(''); showToast("Terkirim!", "success");
@@ -800,12 +846,51 @@ export default function App() {
 
   const myPayments = useMemo(() => {
     if (!sessionUser) return [];
-    if (sessionUser.role === 'admin') return payments;
-    return payments.filter(p => p.houseNumber === sessionUser.houseNumber);
-  }, [payments, sessionUser]);
+    if (sessionUser.role !== 'admin') return payments.filter(p => p.houseNumber === sessionUser.houseNumber);
+
+    // --- ADMIN FILTER LOGIC (NEW) ---
+    // If admin, apply date filter to the list as well
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    return payments.filter(p => {
+      const pDate = new Date(p.date);
+      switch(recapFilterType) {
+        case 'today': return pDate >= startOfDay;
+        case 'yesterday':
+          const yesterday = new Date(startOfDay);
+          yesterday.setDate(yesterday.getDate() - 1);
+          return pDate >= yesterday && pDate < startOfDay;
+        case 'this_month': return pDate.getMonth() === now.getMonth() && pDate.getFullYear() === now.getFullYear();
+        case 'last_30':
+          const last30 = new Date(now);
+          last30.setDate(last30.getDate() - 30);
+          return pDate >= last30;
+        case 'custom':
+          if (!customStartDate || !customEndDate) return true;
+          const start = new Date(customStartDate);
+          const end = new Date(customEndDate);
+          end.setHours(23, 59, 59);
+          return pDate >= start && pDate <= end;
+        default: return true; 
+      }
+    });
+  }, [payments, sessionUser, recapFilterType, customStartDate, customEndDate]);
 
   const pendingCount = payments.filter(p => p.status === 'pending').length;
   const totalMoney = payments.filter(p => p.status === 'confirmed').reduce((a, b) => a + parseInt(b.amount||0), 0);
+
+  // --- RECAP LOGIC (Based on Filtered Data but only Confirmed) ---
+  const categoryRecap = useMemo(() => {
+    const recap = {};
+    categories.forEach(cat => recap[cat] = 0);
+    // Use myPayments (which is already date-filtered for admin) but filter only CONFIRMED for money
+    myPayments.filter(p => p.status === 'confirmed').forEach(p => {
+       const cat = p.category || 'Iuran Rutin';
+       recap[cat] = (recap[cat] || 0) + parseInt(p.amount || 0);
+    });
+    return recap;
+  }, [myPayments, categories]);
 
   return (
     <SecurityGuard>
@@ -892,8 +977,8 @@ export default function App() {
                 )}
               </div>
               <div className="mt-8 text-center text-xs text-gray-400">
-                <p>© 2026 {appConfig.appName}. All rights reserved.</p>
-                <p className="mt-1">Sistem Informasi Warga Terpadu</p>
+                <p>© 2024 {appConfig.appName}. All rights reserved.</p>
+                <p className="mt-1">SiWarga App Version {APP_VERSION}</p>
               </div>
             </div>
           </div>
@@ -920,33 +1005,111 @@ export default function App() {
               </div>
             </header>
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+              {/* ADMIN DASHBOARD */}
               {sessionUser.role === 'admin' && (
-                 <div className="md:hidden bg-white p-4 rounded-xl shadow-sm border border-emerald-100 mb-6 flex justify-between items-center"><div><p className="text-xs text-gray-500 uppercase tracking-wide">Total Dana</p><p className="text-xl font-bold text-emerald-700">{formatCurrency(totalMoney)}</p></div><div className="bg-emerald-100 p-2 rounded-lg"><CreditCard className="w-6 h-6 text-emerald-600"/></div></div>
-              )}
-              {sessionUser.role === 'admin' && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-                  <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 transition-shadow hover:shadow-md"><div className="flex items-center justify-between"><div><p className="text-sm font-medium text-gray-500">Menunggu Verifikasi</p><p className="text-3xl font-bold text-gray-900 mt-1">{pendingCount}</p></div><div className="p-3 bg-yellow-50 rounded-xl"><Clock className="w-8 h-8 text-yellow-600" /></div></div></div>
-                  <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 transition-shadow hover:shadow-md"><div className="flex items-center justify-between"><div><p className="text-sm font-medium text-gray-500">Total Transaksi</p><p className="text-3xl font-bold text-gray-900 mt-1">{payments.length}</p></div><div className="p-3 bg-blue-50 rounded-xl"><CreditCard className="w-8 h-8 text-blue-600" /></div></div></div>
-                  <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 transition-shadow hover:shadow-md"><div className="flex items-center justify-between"><div><p className="text-sm font-medium text-gray-500">Warga Terdaftar</p><p className="text-3xl font-bold text-gray-900 mt-1">{users.length}</p></div><div className="p-3 bg-indigo-50 rounded-xl"><User className="w-8 h-8 text-indigo-600" /></div></div></div>
+                <div className="mb-8 space-y-6">
+                  {/* Top Stats Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 transition-shadow hover:shadow-md"><div className="flex items-center justify-between"><div><p className="text-sm font-medium text-gray-500">Menunggu Verifikasi</p><p className="text-3xl font-bold text-gray-900 mt-1">{pendingCount}</p></div><div className="p-3 bg-yellow-50 rounded-xl"><Clock className="w-8 h-8 text-yellow-600" /></div></div></div>
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 transition-shadow hover:shadow-md"><div className="flex items-center justify-between"><div><p className="text-sm font-medium text-gray-500">Total Transaksi</p><p className="text-3xl font-bold text-gray-900 mt-1">{payments.length}</p></div><div className="p-3 bg-blue-50 rounded-xl"><CreditCard className="w-8 h-8 text-blue-600" /></div></div></div>
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 transition-shadow hover:shadow-md"><div className="flex items-center justify-between"><div><p className="text-sm font-medium text-gray-500">Warga Terdaftar</p><p className="text-3xl font-bold text-gray-900 mt-1">{users.length}</p></div><div className="p-3 bg-indigo-50 rounded-xl"><User className="w-8 h-8 text-indigo-600" /></div></div></div>
+                  </div>
+
+                  {/* Filter & Recap Section */}
+                  <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+                        <div className="flex items-center gap-2">
+                           <PieChart className="w-5 h-5 text-emerald-600"/>
+                           <h3 className="text-lg font-bold text-gray-800">Rekapitulasi</h3>
+                        </div>
+                        <div className="flex flex-wrap gap-2 items-center">
+                           {/* Filter Dropdown */}
+                           <div className="relative">
+                             <select 
+                                value={recapFilterType} 
+                                onChange={e=>setRecapFilterType(e.target.value)} 
+                                className="appearance-none pl-8 pr-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-white"
+                             >
+                                <option value="all">Semua Waktu</option>
+                                <option value="today">Hari Ini</option>
+                                <option value="yesterday">Kemarin</option>
+                                <option value="this_month">Bulan Ini</option>
+                                <option value="last_30">30 Hari Terakhir</option>
+                                <option value="custom">Custom Tanggal</option>
+                             </select>
+                             <Filter className="w-4 h-4 text-gray-400 absolute left-2.5 top-2.5"/>
+                             <ChevronDown className="w-4 h-4 text-gray-400 absolute right-2.5 top-2.5 pointer-events-none"/>
+                           </div>
+                           
+                           {/* Custom Date Inputs */}
+                           {recapFilterType === 'custom' && (
+                             <div className="flex gap-2 items-center animate-in fade-in slide-in-from-right-4">
+                               <input type="date" value={customStartDate} onChange={e=>setCustomStartDate(e.target.value)} className="p-1.5 border rounded text-xs"/>
+                               <span className="text-gray-400">-</span>
+                               <input type="date" value={customEndDate} onChange={e=>setCustomEndDate(e.target.value)} className="p-1.5 border rounded text-xs"/>
+                             </div>
+                           )}
+
+                           {/* Category Mgmt Button (Bendahara Only) */}
+                           <button onClick={()=>setIsCategoryModalOpen(true)} className="ml-2 px-3 py-2 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors flex items-center gap-1 border border-indigo-200">
+                              <Tags className="w-3 h-3"/> Kelola Kategori
+                           </button>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      {Object.keys(categoryRecap).map((cat) => (
+                        <div key={cat} className="p-4 rounded-lg bg-gray-50 border border-gray-100 hover:border-emerald-200 transition-colors">
+                          <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">{cat}</p>
+                          <p className="text-lg font-bold text-emerald-700">{formatCurrency(categoryRecap[cat])}</p>
+                        </div>
+                      ))}
+                      {Object.keys(categoryRecap).length === 0 && <p className="text-sm text-gray-400 col-span-4 text-center py-4">Tidak ada data transaksi untuk periode ini.</p>}
+                    </div>
+                  </div>
                 </div>
               )}
+
               {sessionUser.role === 'warga' && (
                 <div className="mb-8 flex justify-between items-center"><div><h2 className="text-2xl font-bold text-gray-900">Halo, {sessionUser.name.split(' ')[0]}!</h2><p className="text-gray-500 text-sm">Berikut adalah riwayat pembayaran iuran Anda.</p></div><button onClick={() => setIsModalOpen(true)} className="px-6 py-3 bg-gray-900 text-white rounded-xl hover:bg-black font-medium shadow-lg hover:shadow-xl transition-all flex items-center gap-2 transform hover:-translate-y-0.5"><Plus className="w-5 h-5" /><span className="hidden sm:inline">Bayar Iuran</span><span className="sm:hidden">Bayar</span></button></div>
               )}
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50"><h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">{sessionUser.role === 'admin' ? <Database className="w-5 h-5 text-gray-500"/> : <CreditCard className="w-5 h-5 text-gray-500"/>}{sessionUser.role === 'admin' ? 'Semua Transaksi Masuk' : 'Riwayat Pembayaran'}</h2><button onClick={handleRefresh} className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Refresh Data"><RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} /></button></div>
+                <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+                  <div className="flex items-center gap-4">
+                    <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">{sessionUser.role === 'admin' ? <Database className="w-5 h-5 text-gray-500"/> : <CreditCard className="w-5 h-5 text-gray-500"/>}{sessionUser.role === 'admin' ? 'Daftar Transaksi' : 'Riwayat Pembayaran'}</h2>
+                    {sessionUser.role === 'admin' && (
+                      <div className="relative hidden md:block">
+                         <select 
+                            value={recapFilterType} 
+                            onChange={e=>setRecapFilterType(e.target.value)} 
+                            className="appearance-none pl-7 pr-6 py-1 border border-gray-300 rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-white text-gray-600"
+                         >
+                            <option value="all">Semua</option>
+                            <option value="today">Hari Ini</option>
+                            <option value="this_month">Bulan Ini</option>
+                            <option value="custom">Custom</option>
+                         </select>
+                         <Filter className="w-3 h-3 text-gray-400 absolute left-2 top-1.5"/>
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={handleRefresh} className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Refresh Data"><RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} /></button>
+                </div>
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50"><tr><th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Tanggal</th><th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Warga</th><th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Periode</th><th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Jumlah</th><th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>{sessionUser.role === 'admin' && (<th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Aksi</th>)}</tr></thead>
+                    <thead className="bg-gray-50"><tr><th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Tanggal</th><th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Warga</th><th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Detail Iuran</th><th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Jumlah</th><th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>{sessionUser.role === 'admin' && (<th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Aksi</th>)}</tr></thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {myPayments.length === 0 ? (
-                        <tr><td colSpan={sessionUser.role === 'admin' ? 6 : 5} className="px-6 py-12 text-center text-gray-500"><div className="flex flex-col items-center justify-center"><div className="bg-gray-50 rounded-full p-4 mb-3"><FileSpreadsheet className="w-8 h-8 text-gray-300"/></div><p>Belum ada data transaksi.</p></div></td></tr>
+                        <tr><td colSpan={sessionUser.role === 'admin' ? 6 : 5} className="px-6 py-12 text-center text-gray-500"><div className="flex flex-col items-center justify-center"><div className="bg-gray-50 rounded-full p-4 mb-3"><FileSpreadsheet className="w-8 h-8 text-gray-300"/></div><p>Belum ada data transaksi untuk periode ini.</p></div></td></tr>
                       ) : (
                         myPayments.map((payment) => (
                           <tr key={payment.id} className="hover:bg-slate-50 transition-colors group">
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{new Date(payment.date).toLocaleDateString('id-ID', {day: 'numeric', month: 'short', year: 'numeric'})}</td>
                             <td className="px-6 py-4 whitespace-nowrap"><div className="flex items-center"><div className="h-8 w-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-xs mr-3">{payment.userName.charAt(0)}</div><div><p className="text-sm font-medium text-gray-900">{payment.userName}</p><p className="text-xs text-gray-500 font-mono">{payment.houseNumber}</p></div></div></td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900"><span className="bg-gray-100 px-2 py-1 rounded text-xs font-medium">{payment.month} {payment.year}</span></td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                              <span className="bg-gray-100 px-2 py-1 rounded text-xs font-medium mr-2">{payment.category || 'Iuran Rutin'}</span>
+                              <span className="text-gray-500 text-xs">{payment.month} {payment.year}</span>
+                            </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 font-mono">{formatCurrency(payment.amount)}</td>
                             <td className="px-6 py-4 whitespace-nowrap"><StatusBadge status={payment.status} /></td>
                             {sessionUser.role === 'admin' && (
@@ -973,8 +1136,45 @@ export default function App() {
           </div>
         )}
 
+        {/* Modal: Category Management (Bendahara Only) */}
+        <Modal isOpen={isCategoryModalOpen} onClose={() => setIsCategoryModalOpen(false)} title="Manajemen Kategori">
+          <div className="space-y-4">
+             <div className="flex gap-2 mb-4">
+               <input type="text" value={newCatName} onChange={e=>setNewCatName(e.target.value)} placeholder="Nama Kategori Baru" className="flex-1 p-2 rounded-lg border border-indigo-200 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+               <button onClick={() => { if(newCatName.trim()) { handleAddCategory(newCatName); setNewCatName(''); } }} disabled={loading} className="bg-indigo-600 text-white px-4 rounded-lg text-sm font-bold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-1">
+                 {loading ? <RefreshCw className="w-4 h-4 animate-spin"/> : <Plus className="w-4 h-4"/>}
+               </button>
+             </div>
+             
+             <div className="bg-white rounded-lg border border-gray-200 overflow-hidden max-h-64 overflow-y-auto">
+                <ul className="divide-y divide-gray-100">
+                  {categories.map((cat, idx) => (
+                    <li key={idx} className="flex justify-between items-center p-3 hover:bg-gray-50 transition-colors">
+                      <span className="text-sm font-medium text-gray-700">{cat}</span>
+                      <button onClick={() => handleDeleteCategory(cat)} className="text-red-500 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50" title="Hapus">
+                        <Trash2 className="w-4 h-4"/>
+                      </button>
+                    </li>
+                  ))}
+                  {categories.length === 0 && <li className="p-4 text-center text-sm text-gray-400">Belum ada kategori iuran.</li>}
+                </ul>
+             </div>
+          </div>
+        </Modal>
+
         <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Ajukan Pembayaran Baru">
           <form onSubmit={handleSubmitPayment} className="space-y-5">
+            {/* Kategori Input */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Kategori Iuran</label>
+              <div className="relative">
+                <select value={payCategory} onChange={(e) => setPayCategory(e.target.value)} className="w-full appearance-none p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none text-sm bg-white">
+                  {categories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
+                </select>
+                <ChevronDown className="absolute right-2 top-3 w-4 h-4 text-gray-400 pointer-events-none"/>
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm font-medium text-gray-700 mb-1">Bulan</label><div className="relative"><select value={payMonth} onChange={(e) => setPayMonth(e.target.value)} className="w-full appearance-none p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none text-sm bg-white">{MONTHS.map((month) => <option key={month} value={month}>{month}</option>)}</select><ChevronDown className="absolute right-2 top-3 w-4 h-4 text-gray-400 pointer-events-none"/></div></div><div><label className="block text-sm font-medium text-gray-700 mb-1">Tahun</label><input type="number" value={payYear} onChange={(e) => setPayYear(parseInt(e.target.value))} className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none text-sm" min="2020" max="2030"/></div></div>
             
             {/* INPUT NOMINAL DENGAN FORMAT RIBUAN */}
