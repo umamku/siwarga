@@ -38,6 +38,9 @@ import {
 // --- CONSTANTS ---
 const APP_VERSION = "2.1"; // Versi Aplikasi sesuai permintaan
 
+// MASUKKAN URL GOOGLE SCRIPT ANDA DI SINI (Supaya otomatis terbaca di semua HP)
+const GLOBAL_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxtUS-oCaTEuM5KPVLXe3rhv1mjv_0sZ6gOk3nQNml--tqaZ1Wn6pRYNuXGOL57FiGV/exec";
+
 // --- SECURITY UTILS ---
 
 async function hashString(message) {
@@ -502,7 +505,11 @@ export default function App() {
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES); 
   
   const [sessionUser, setSessionUser] = useState(null);
-  const [dbConfig, setDbConfig] = useState({ mode: 'sheet', scriptUrl: '' });
+  // Gunakan GLOBAL_SCRIPT_URL sebagai nilai awal (default)
+const [dbConfig, setDbConfig] = useState({ 
+  mode: 'sheet', 
+  scriptUrl: GLOBAL_SCRIPT_URL 
+});
   const [appConfig, setAppConfig] = useState({ appName: 'SiWarga', housingName: 'Perumahan Muslim Mutiara Darussalam', logoUrl: '' });
   const [settingsPassHash, setSettingsPassHash] = useState('');
   const [isSettingsUnlocked, setIsSettingsUnlocked] = useState(false);
@@ -558,8 +565,34 @@ export default function App() {
 
   useEffect(() => {
     const initializeSecurity = async () => {
+      // --- PERBAIKAN LOGIKA: Prioritaskan GLOBAL_SCRIPT_URL ---
+      
+      // 1. Ambil data lama dari penyimpanan lokal
       const savedConfig = localStorage.getItem('siwarga_db_config');
-      if (savedConfig) setDbConfig(JSON.parse(savedConfig));
+      
+      // 2. Siapkan config default pakai URL Global Anda
+      let finalConfig = { mode: 'sheet', scriptUrl: GLOBAL_SCRIPT_URL };
+
+      if (savedConfig) {
+        // Jika ada data lama, kita cek dulu
+        const parsed = JSON.parse(savedConfig);
+        
+        // PENTING: Jika di data lama URL-nya kosong atau beda, 
+        // kita PAKSA ganti dengan GLOBAL_SCRIPT_URL yang ada di kodingan
+        if (!parsed.scriptUrl || parsed.scriptUrl.trim() === '') {
+           parsed.scriptUrl = GLOBAL_SCRIPT_URL;
+        }
+        
+        // Opsional: Jika Anda ingin memaksakan URL global walaupun user pernah input manual
+        // hapus if di atas dan langsung pakai: parsed.scriptUrl = GLOBAL_SCRIPT_URL;
+        
+        finalConfig = parsed;
+      }
+      
+      // 3. Simpan konfigurasi final ke state DAN update localStorage agar sinkron
+      setDbConfig(finalConfig);
+      localStorage.setItem('siwarga_db_config', JSON.stringify(finalConfig));
+      // ---------------------------------------------------------
 
       const savedAppConfig = localStorage.getItem('siwarga_app_config');
       if (savedAppConfig) setAppConfig(JSON.parse(savedAppConfig));
@@ -589,7 +622,7 @@ export default function App() {
       setSettingsPassHash(currentHash);
     };
     initializeSecurity();
-  }, []);
+  }, []); // Dependensi kosong berarti cuma jalan sekali pas load
 
   useEffect(() => { if (dbConfig.mode === 'sheet' && dbConfig.scriptUrl) fetchDataFromSheet(); }, [dbConfig]);
   useEffect(() => { if (isLockedOut) { const timer = setTimeout(() => { setIsLockedOut(false); setFailedAttempts(0); }, 30000); return () => clearTimeout(timer); } }, [isLockedOut]);
