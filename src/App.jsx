@@ -503,7 +503,7 @@ export default function App() {
   
   const [sessionUser, setSessionUser] = useState(null);
   const [dbConfig, setDbConfig] = useState({ mode: 'sheet', scriptUrl: '' });
-  const [appConfig, setAppConfig] = useState({ appName: 'SiWarga v2.1', housingName: 'Perumahan Muslim Mutiara Darussalam', logoUrl: '' });
+  const [appConfig, setAppConfig] = useState({ appName: 'SiWarga', housingName: 'Perumahan Muslim Mutiara Darussalam', logoUrl: '' });
   const [settingsPassHash, setSettingsPassHash] = useState('');
   const [isSettingsUnlocked, setIsSettingsUnlocked] = useState(false);
   const [inputSettingsPass, setInputSettingsPass] = useState('');
@@ -978,7 +978,7 @@ export default function App() {
               </div>
               <div className="mt-8 text-center text-xs text-gray-400">
                 <p>© 2024 {appConfig.appName}. All rights reserved.</p>
-                <p className="mt-1">SiWarga App Version {APP_VERSION}</p>
+                <p className="mt-1">Sistem Informasi Warga Terpadu</p>
               </div>
             </div>
           </div>
