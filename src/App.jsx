@@ -404,7 +404,7 @@ export default function App() {
   // Payment States
   const [payMonth, setPayMonth] = useState(MONTHS[new Date().getMonth()]);
   const [payYear, setPayYear] = useState(new Date().getFullYear());
-  const [payAmount, setPayAmount] = useState(50000);
+  const [payAmount, setPayAmount] = useState(200000);
   const [payNote, setPayNote] = useState('');
   const [payFile, setPayFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
