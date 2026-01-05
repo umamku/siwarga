@@ -263,21 +263,53 @@ const formatCurrency = (amount) => new Intl.NumberFormat('id-ID', { style: 'curr
 const generateId = () => Math.random().toString(36).substr(2, 9);
 const convertFileToBase64 = (file) => new Promise((resolve, reject) => { const reader = new FileReader(); reader.readAsDataURL(file); reader.onload = () => resolve(reader.result); reader.onerror = error => reject(error); });
 
+// PERBAIKAN: Fungsi getEmbedUrl yang diperbaiki
 const getEmbedUrl = (url) => {
   if (!url) return '';
   try {
     const cleanUrl = url.trim();
     if (!cleanUrl.startsWith('http')) return '';
-    if (cleanUrl.includes('drive.google.com') || cleanUrl.includes('googleusercontent.com')) {
-      let id = '';
-      const lh3Match = cleanUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
-      if (lh3Match) id = lh3Match[1];
-      if (!id) { const fileMatch = cleanUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/); if (fileMatch) id = fileMatch[1]; }
-      if (!id) { const idMatch = cleanUrl.match(/id=([a-zA-Z0-9_-]+)/); if (idMatch) id = idMatch[1]; }
-      if (id) return `https://drive.google.com/thumbnail?id=${id}&sz=w1000`;
+    
+    // Jika URL sudah langsung ke Google Thumbnail, return langsung
+    if (cleanUrl.includes('googleusercontent.com')) {
+      // Format: https://lh3.googleusercontent.com/d/xxx
+      return cleanUrl;
     }
+    
+    if (cleanUrl.includes('drive.google.com')) {
+      // Extract file ID dari berbagai format URL Google Drive
+      let fileId = '';
+      
+      // Format: https://drive.google.com/file/d/xxx/view
+      const fileMatch = cleanUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+      if (fileMatch) {
+        fileId = fileMatch[1];
+      }
+      
+      // Format: https://drive.google.com/open?id=xxx
+      if (!fileId) {
+        const idMatch = cleanUrl.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+        if (idMatch) {
+          fileId = idMatch[1];
+        }
+      }
+      
+      // Format: https://drive.google.com/thumbnail?id=xxx (sudah embed)
+      if (cleanUrl.includes('/thumbnail?')) {
+        return cleanUrl;
+      }
+      
+      if (fileId) {
+        // Gunakan URL preview Google Drive
+        return `https://drive.google.com/thumbnail?id=${fileId}&sz=w1000`;
+      }
+    }
+    
     return cleanUrl;
-  } catch (e) { return ''; }
+  } catch (e) { 
+    console.error("Error parsing URL:", e);
+    return ''; 
+  }
 };
 
 const copyToClipboard = (text) => {
@@ -506,10 +538,10 @@ export default function App() {
   
   const [sessionUser, setSessionUser] = useState(null);
   // Gunakan GLOBAL_SCRIPT_URL sebagai nilai awal (default)
-const [dbConfig, setDbConfig] = useState({ 
-  mode: 'sheet', 
-  scriptUrl: GLOBAL_SCRIPT_URL 
-});
+  const [dbConfig, setDbConfig] = useState({ 
+    mode: 'sheet', 
+    scriptUrl: GLOBAL_SCRIPT_URL 
+  });
   const [appConfig, setAppConfig] = useState({ appName: 'SiWarga', housingName: 'Perumahan Muslim Mutiara Darussalam', logoUrl: '' });
   const [settingsPassHash, setSettingsPassHash] = useState('');
   const [isSettingsUnlocked, setIsSettingsUnlocked] = useState(false);
@@ -623,6 +655,27 @@ const [dbConfig, setDbConfig] = useState({
     };
     initializeSecurity();
   }, []); // Dependensi kosong berarti cuma jalan sekali pas load
+
+  useEffect(() => { 
+    // Script untuk fallback gambar
+    const handleImageError = () => {
+      const fallback = document.getElementById('fallback-container');
+      if (fallback) {
+        fallback.classList.remove('hidden');
+      }
+    };
+    
+    document.addEventListener('DOMContentLoaded', () => {
+      const images = document.querySelectorAll('img[src*="drive.google.com"]');
+      images.forEach(img => {
+        img.addEventListener('error', handleImageError);
+      });
+    });
+    
+    return () => {
+      document.removeEventListener('DOMContentLoaded', handleImageError);
+    };
+  }, []);
 
   useEffect(() => { if (dbConfig.mode === 'sheet' && dbConfig.scriptUrl) fetchDataFromSheet(); }, [dbConfig]);
   useEffect(() => { if (isLockedOut) { const timer = setTimeout(() => { setIsLockedOut(false); setFailedAttempts(0); }, 30000); return () => clearTimeout(timer); } }, [isLockedOut]);
@@ -1148,8 +1201,17 @@ const [dbConfig, setDbConfig] = useState({
                             {sessionUser.role === 'admin' && (
                               <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                 <div className="flex justify-end gap-2 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-                                  {payment.status === 'pending' ? ( <><button onClick={() => handleVerify(payment.id, 'confirmed')} className="p-1.5 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 border border-green-200 transition-colors" title="Setujui"><Check className="w-4 h-4"/></button><button onClick={() => handleVerify(payment.id, 'rejected')} className="p-1.5 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 border border-red-200 transition-colors" title="Tolak"><X className="w-4 h-4"/></button></> ) : ( <span className="text-xs text-gray-400 italic py-1.5">Selesai</span> )}
-                                  {payment.proofLink && ( <button onClick={() => setViewProofModal(payment)} className="p-1.5 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 border border-blue-200 transition-colors" title="Lihat Bukti"><LinkIcon className="w-4 h-4"/></button> )}
+                                  {payment.status === 'pending' ? ( 
+                                    <>
+                                      <button onClick={() => handleVerify(payment.id, 'confirmed')} className="p-1.5 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 border border-green-200 transition-colors" title="Setujui"><Check className="w-4 h-4"/></button>
+                                      <button onClick={() => handleVerify(payment.id, 'rejected')} className="p-1.5 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 border border-red-200 transition-colors" title="Tolak"><X className="w-4 h-4"/></button>
+                                    </> 
+                                  ) : ( 
+                                    <span className="text-xs text-gray-400 italic py-1.5">Selesai</span> 
+                                  )}
+                                  {payment.proofLink && ( 
+                                    <button onClick={() => setViewProofModal(payment)} className="p-1.5 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 border border-blue-200 transition-colors" title="Lihat Bukti"><Eye className="w-4 h-4"/></button> 
+                                  )}
                                 </div>
                               </td>
                             )}
@@ -1192,6 +1254,76 @@ const [dbConfig, setDbConfig] = useState({
                   {categories.length === 0 && <li className="p-4 text-center text-sm text-gray-400">Belum ada kategori iuran.</li>}
                 </ul>
              </div>
+          </div>
+        </Modal>
+
+        {/* PERBAIKAN: Modal untuk View Proof */}
+        <Modal 
+          isOpen={!!viewProofModal} 
+          onClose={() => setViewProofModal(null)} 
+          title="Bukti Transfer"
+        >
+          <div className="space-y-4">
+            <div className="text-sm text-gray-600">
+              <p><span className="font-medium">Warga:</span> {viewProofModal?.userName}</p>
+              <p><span className="font-medium">Rumah:</span> {viewProofModal?.houseNumber}</p>
+              <p><span className="font-medium">Tanggal:</span> {viewProofModal?.date ? new Date(viewProofModal.date).toLocaleDateString('id-ID') : '-'}</p>
+              <p><span className="font-medium">Kategori:</span> {viewProofModal?.category || 'Iuran Rutin'}</p>
+              <p><span className="font-medium">Jumlah:</span> {formatCurrency(viewProofModal?.amount || 0)}</p>
+              {viewProofModal?.note && <p><span className="font-medium">Catatan:</span> {viewProofModal.note}</p>}
+            </div>
+            
+            <div className="border rounded-lg overflow-hidden bg-gray-50">
+              {viewProofModal?.proofLink ? (
+                <div className="relative">
+                  <img 
+                    src={getEmbedUrl(viewProofModal.proofLink)} 
+                    alt="Bukti Transfer" 
+                    className="w-full h-auto max-h-96 object-contain mx-auto"
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.src = `https://via.placeholder.com/600x400/FFE4B5/FFA500?text=Gagal+Memuat+Gambar`;
+                      e.target.alt = "Bukti tidak dapat dimuat";
+                    }}
+                  />
+                  
+                  {/* Fallback jika gambar gagal dimuat */}
+                  <div id="fallback-container" className="hidden text-center p-4">
+                    <AlertCircle className="w-12 h-12 text-orange-500 mx-auto mb-2" />
+                    <p className="text-sm text-gray-600 mb-2">Bukti transfer tidak dapat ditampilkan</p>
+                    <button 
+                      onClick={() => window.open(viewProofModal?.proofLink, '_blank')}
+                      className="px-4 py-2 bg-blue-500 text-white text-sm rounded hover:bg-blue-600"
+                    >
+                      Buka di Tab Baru
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center p-8">
+                  <FileSpreadsheet className="w-16 h-16 text-gray-300 mx-auto mb-3" />
+                  <p className="text-gray-500">Tidak ada bukti transfer</p>
+                </div>
+              )}
+            </div>
+            
+            <div className="flex justify-between items-center pt-4 border-t">
+              <button
+                onClick={() => window.open(viewProofModal?.proofLink, '_blank')}
+                className="px-4 py-2 border border-gray-300 text-gray-700 text-sm rounded hover:bg-gray-50 flex items-center gap-2"
+                title="Buka di tab baru"
+              >
+                <LinkIcon className="w-4 h-4" />
+                Buka di Tab Baru
+              </button>
+              
+              <button
+                onClick={() => setViewProofModal(null)}
+                className="px-4 py-2 bg-gray-900 text-white text-sm rounded hover:bg-black"
+              >
+                Tutup
+              </button>
+            </div>
           </div>
         </Modal>
 
